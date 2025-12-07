@@ -35,7 +35,17 @@ hardware:
 llm:
   provider: "openai"  # Options: "openai", "azure", "local"
   model: "gpt-4o-mini"  # Recommended for cost/performance balance
-  api_key_env: "OPENAI_API_KEY"  # Environment variable name
+  
+  # API Key - Choose ONE of these methods:
+  # Method 1: Direct key (easier, less secure)
+  # api_key: "sk-your-api-key-here"
+  
+  # Method 2: Environment variable (recommended for security)
+  api_key_env: "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"  # Reads from this env variable
+  
+  # Optional: Custom API endpoint (for Azure, local LLM, etc.)
+  # base_url: "https://your-endpoint.openai.azure.com/v1"
+  
   max_tokens: 500
   temperature: 0.7
   
@@ -44,21 +54,33 @@ llm:
     You are an intelligent assistant controlling a quadruped robot dog called WaveGo.
     You can help the user by executing movement commands and answering questions.
     
-    When the user gives you a command, analyze it and respond with a JSON object containing:
-    - "intent": The action type (move, look, stop, query, gesture, light, unknown)
-    - "action": Specific action (forward, backward, left, right, up, down, stop, jump, handshake, steady)
-    - "parameters": Any parameters like distance, speed, duration, color
-    - "reply": A natural language response to the user
+    For SIMPLE commands, respond with:
+    {
+      "intent": "move|look|stop|query|gesture|light|unknown",
+      "action": "specific action",
+      "parameters": {"direction": "forward", "duration": 1.0, "color": "blue"},
+      "reply": "Natural language response"
+    }
     
-    Available actions:
+    For COMPLEX/SEQUENTIAL commands (like "先前进再后退", "walk forward then turn"), respond with:
+    {
+      "intent": "sequence",
+      "actions": [
+        {"action": "forward", "duration": 2.0},
+        {"action": "backward", "duration": 2.0}
+      ],
+      "reply": "Description of what I'll do"
+    }
+    
+    Available actions for sequences:
     - Movement: forward, backward, left, right, stop
-    - Head control: look_up, look_down, look_left, look_right
+    - Head: look_up, look_down, look_left, look_right
     - Gestures: jump, handshake, steady
-    - Lights: Set LED color (blue, red, green, yellow, cyan, magenta, cyber, off) - robot has dual lights
+    - Lights: light_blue, light_red, light_green, light_yellow, light_cyan, light_magenta, light_cyber, light_off
+    - Control: wait (pause), buzzer_on, buzzer_off
     
-    Consider the vision_state when making decisions:
+    Consider vision_state when making decisions:
     - If obstacle_ahead is true, do NOT move forward
-    - If a target object is detected, you can report its position
     
     Always respond in valid JSON format.
 
@@ -85,9 +107,12 @@ speech:
 # -----------------------------------------------------------------------------
 tts:
   # TTS Engine: "pyttsx3", "gtts", "openai"
-  engine: "pyttsx3"
+  # - pyttsx3: Offline, requires espeak (sudo apt install espeak espeak-ng)
+  # - gtts: Google TTS, requires internet, better quality
+  # - openai: OpenAI TTS API, highest quality, requires API key
+  engine: "gtts"  # Changed to gtts as default (more reliable)
   
-  # Voice settings
+  # Voice settings (for pyttsx3)
   voice_rate: 150  # Words per minute
   voice_volume: 0.9  # 0.0 to 1.0
   
