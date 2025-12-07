@@ -96,11 +96,10 @@ class VisionProcessor:
         """Initialize the face detection cascade classifier."""
         # Try multiple paths for the cascade file
         cascade_paths = [
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml',
-            '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml',
-            '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
-            os.path.join(os.path.dirname(__file__), 'haarcascade_frontalface_default.xml'),
-        ]
+                    '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml',
+                    '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
+                    os.path.join(os.path.dirname(__file__), 'haarcascade_frontalface_default.xml'),
+                ]
         
         for path in cascade_paths:
             if os.path.exists(path):
@@ -128,7 +127,7 @@ class VisionProcessor:
         
         self._color_lower = np.array([h_low, s_min, v_min])
         self._color_upper = np.array([h_high, s_max, v_max])
-        print(f"[Vision] Color target set: H={h_center}±{h_range}, "
+        print(f"[Vision] Color target set: H={h_center}卤{h_range}, "
               f"S={s_min}-{s_max}, V={v_min}-{v_max}")
     
     def set_callback(self, callback: Callable[[VisionState], None]):
@@ -250,7 +249,9 @@ class VisionProcessor:
                     if frame is not None:
                         # Convert from RGBA/BGRA to BGR if needed
                         if frame.shape[2] == 4:
-                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                        elif frame.shape[2] == 3:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 except Exception as e:
                     time.sleep(0.1)
                     continue
