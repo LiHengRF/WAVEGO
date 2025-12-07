@@ -57,7 +57,7 @@ class LLMClient:
     DEFAULT_SYSTEM_PROMPT = """You are an intelligent assistant controlling a quadruped robot dog called WaveGo.
 You receive user commands (voice transcriptions) and vision state information.
 
-Analyze the input and respond with a JSON object containing:
+Analyze the input and respond with a JSON object. For SIMPLE commands (single action):
 {
     "intent": "move|look|stop|query|gesture|light|unknown",
     "action": "specific action name",
@@ -70,16 +70,34 @@ Analyze the input and respond with a JSON object containing:
     "reply": "Natural language response to user"
 }
 
-Available actions:
-- Movement (intent="move"): forward, backward, left, right, stop
-- Head control (intent="look"): up, down, left, right, stop
-- Gestures (intent="gesture"): jump, handshake, steady
-- Lights (intent="light"): on, off, color (the robot has two lights that will both change)
-- Stop (intent="stop"): stop all movement
+For COMPLEX commands (multiple sequential actions like "先前进再后退" or "walk forward then turn left"):
+{
+    "intent": "sequence",
+    "actions": [
+        {"action": "forward", "duration": 2.0},
+        {"action": "backward", "duration": 2.0}
+    ],
+    "reply": "Natural language response describing what I'll do"
+}
+
+Available actions for sequences:
+- Movement: forward, backward, left, right, stop
+- Head: look_up, look_down, look_left, look_right
+- Gestures: jump, handshake, steady
+- Lights: light_red, light_blue, light_green, light_off, etc.
+- Pause: wait (use duration to specify seconds)
+
+Examples of complex commands:
+- "先向前走2秒，然后向后走" → sequence with [forward 2s, backward 2s]
+- "转一圈" → sequence with [left 2s] or [right 2s] (360 degree turn)
+- "走个方形" → sequence with [forward, right, forward, right, forward, right, forward]
+- "jump then wave" → sequence with [jump, handshake]
+- "闪烁红蓝灯" → sequence with [light_red, wait 0.5, light_blue, wait 0.5, light_red...]
 
 Safety rules:
 - If vision_state.obstacle_ahead is true, do NOT generate forward movement
 - Always acknowledge the user's request in your reply
+- For sequences, estimate reasonable durations (default 1-2 seconds per action)
 
 IMPORTANT: Always respond with valid JSON only, no additional text."""
 
@@ -327,8 +345,17 @@ class MockLLMClient(LLMClient):
     def _match_command(self, msg: str, obstacle_ahead: bool) -> Dict[str, Any]:
         """Match command patterns and generate response."""
         
+        # Check for sequence patterns first (multi-step commands)
+        sequence_patterns = [
+            "then", "and then", "after that", "next",  # English
+            "然后", "再", "接着", "之后", "先",  # Chinese
+        ]
+        
+        if any(pattern in msg for pattern in sequence_patterns):
+            return self._parse_sequence_command(msg, obstacle_ahead)
+        
         # Movement commands
-        if any(word in msg for word in ["forward", "ahead", "straight"]):
+        if any(word in msg for word in ["forward", "ahead", "straight", "前进", "向前"]):
             if obstacle_ahead:
                 return {
                     "intent": "stop",
@@ -343,7 +370,7 @@ class MockLLMClient(LLMClient):
                 "reply": "Moving forward."
             }
         
-        if any(word in msg for word in ["backward", "back", "reverse"]):
+        if any(word in msg for word in ["backward", "back", "reverse", "后退", "向后"]):
             return {
                 "intent": "move",
                 "action": "backward",
@@ -351,7 +378,7 @@ class MockLLMClient(LLMClient):
                 "reply": "Moving backward."
             }
         
-        if "left" in msg and "look" not in msg:
+        if ("left" in msg or "左" in msg) and "look" not in msg and "看" not in msg:
             return {
                 "intent": "move",
                 "action": "left",
@@ -359,7 +386,7 @@ class MockLLMClient(LLMClient):
                 "reply": "Turning left."
             }
         
-        if "right" in msg and "look" not in msg:
+        if ("right" in msg or "右" in msg) and "look" not in msg and "看" not in msg:
             return {
                 "intent": "move",
                 "action": "right",
@@ -368,122 +395,148 @@ class MockLLMClient(LLMClient):
             }
         
         # Stop commands
-        if any(word in msg for word in ["stop", "halt", "freeze"]):
+        if any(word in msg for word in ["stop", "halt", "freeze", "停", "停止", "别动", "不要动"]):
             return {
                 "intent": "stop",
                 "action": "stop",
                 "parameters": {},
-                "reply": "Stopping."
+                "reply": "好的，已停止。" if any(c in msg for c in "停别不") else "Stopping."
             }
         
-        # Look commands
-        if "look up" in msg:
+        # Look commands (Chinese)
+        if any(phrase in msg for phrase in ["抬头", "向上看", "往上看", "look up"]):
             return {
                 "intent": "look",
                 "action": "up",
                 "parameters": {},
-                "reply": "Looking up."
+                "reply": "正在抬头。" if any(c in msg for c in "抬上看") else "Looking up."
             }
         
-        if "look down" in msg:
+        if any(phrase in msg for phrase in ["低头", "向下看", "往下看", "look down"]):
             return {
                 "intent": "look",
                 "action": "down",
                 "parameters": {},
-                "reply": "Looking down."
+                "reply": "正在低头。" if any(c in msg for c in "低下看") else "Looking down."
             }
         
-        if "look left" in msg:
+        if any(phrase in msg for phrase in ["向左看", "往左看", "左转头", "look left"]):
             return {
                 "intent": "look",
                 "action": "left",
                 "parameters": {},
-                "reply": "Looking left."
+                "reply": "正在向左看。" if any(c in msg for c in "左看转") else "Looking left."
             }
         
-        if "look right" in msg:
+        if any(phrase in msg for phrase in ["向右看", "往右看", "右转头", "look right"]):
             return {
                 "intent": "look",
                 "action": "right",
                 "parameters": {},
-                "reply": "Looking right."
+                "reply": "正在向右看。" if any(c in msg for c in "右看转") else "Looking right."
             }
         
         # Gestures
-        if "jump" in msg:
+        if any(word in msg for word in ["jump", "跳", "跳跃"]):
             return {
                 "intent": "gesture",
                 "action": "jump",
                 "parameters": {},
-                "reply": "Jumping!"
+                "reply": "跳！" if any(c in msg for c in "跳") else "Jumping!"
             }
         
-        if any(word in msg for word in ["shake", "hand", "hello", "hi"]):
+        if any(word in msg for word in ["shake", "hand", "hello", "hi", "握手", "打招呼", "你好"]):
             return {
                 "intent": "gesture",
                 "action": "handshake",
                 "parameters": {},
-                "reply": "Nice to meet you!"
+                "reply": "你好！很高兴见到你！" if any(c in msg for c in "握招你") else "Nice to meet you!"
             }
         
-        if "steady" in msg or "balance" in msg:
+        if any(word in msg for word in ["steady", "balance", "平衡", "稳定"]):
             return {
                 "intent": "gesture",
                 "action": "steady",
                 "parameters": {},
-                "reply": "Activating steady mode."
+                "reply": "正在启动平衡模式。" if any(c in msg for c in "平稳") else "Activating steady mode."
             }
         
-        # Light commands
-        for color in ["blue", "red", "green", "yellow", "cyan", "magenta"]:
-            if color in msg:
+        # Light commands (English and Chinese)
+        color_map = {
+            "blue": "blue", "蓝": "blue", "蓝色": "blue",
+            "red": "red", "红": "red", "红色": "red",
+            "green": "green", "绿": "green", "绿色": "green",
+            "yellow": "yellow", "黄": "yellow", "黄色": "yellow",
+            "cyan": "cyan", "青": "cyan", "青色": "cyan",
+            "magenta": "magenta", "紫": "magenta", "紫色": "magenta",
+            "cyber": "cyber", "白": "cyber", "白色": "cyber",
+        }
+        
+        for color_word, color_value in color_map.items():
+            if color_word in msg:
+                is_chinese = any(ord(c) > 127 for c in msg)
                 return {
                     "intent": "light",
                     "action": "color",
-                    "parameters": {"color": color},
-                    "reply": f"Setting lights to {color}."
+                    "parameters": {"color": color_value},
+                    "reply": f"灯光设置为{color_word}色。" if is_chinese else f"Setting lights to {color_value}."
                 }
         
-        if "light" in msg and ("off" in msg or "turn off" in msg):
+        if any(phrase in msg for phrase in ["light off", "lights off", "turn off light", "关灯", "灯关"]):
+            is_chinese = any(ord(c) > 127 for c in msg)
             return {
                 "intent": "light",
                 "action": "off",
                 "parameters": {"color": "off"},
-                "reply": "Turning off lights."
+                "reply": "已关闭灯光。" if is_chinese else "Turning off lights."
             }
         
         # Query commands
-        if any(word in msg for word in ["what", "where", "how", "status", "doing"]):
+        query_words_en = ["what", "where", "how", "status", "doing", "see"]
+        query_words_zh = ["什么", "哪里", "怎么", "状态", "干什么", "看到", "在做", "你好吗"]
+        
+        if any(word in msg for word in query_words_en + query_words_zh):
+            is_chinese = any(ord(c) > 127 for c in msg)
             return {
                 "intent": "query",
                 "action": "status",
                 "parameters": {},
-                "reply": "I'm ready and waiting for your commands."
+                "reply": "我已准备好，等待你的命令。你可以说'前进'、'后退'、'跳'、'握手'等。" if is_chinese else "I'm ready and waiting for your commands."
             }
         
-        if "obstacle" in msg:
+        if any(word in msg for word in ["obstacle", "障碍", "前面"]):
+            is_chinese = any(ord(c) > 127 for c in msg)
             if obstacle_ahead:
                 return {
                     "intent": "query",
                     "action": "obstacle_check",
                     "parameters": {},
-                    "reply": "Yes, I detect an obstacle ahead."
+                    "reply": "是的，前方检测到障碍物。" if is_chinese else "Yes, I detect an obstacle ahead."
                 }
             else:
                 return {
                     "intent": "query",
                     "action": "obstacle_check",
                     "parameters": {},
-                    "reply": "No obstacles detected ahead."
+                    "reply": "前方没有检测到障碍物。" if is_chinese else "No obstacles detected ahead."
                 }
         
         # Default unknown
-        return {
-            "intent": "unknown",
-            "action": "none",
-            "parameters": {},
-            "reply": "I'm not sure what you want me to do. Try commands like 'move forward', 'turn left', 'jump', or 'look up'."
-        }
+        is_chinese = any(ord(c) > 127 for c in msg)
+        if is_chinese:
+            return {
+                "intent": "unknown",
+                "action": "none",
+                "parameters": {},
+                "reply": "抱歉，我不太理解。你可以试试这些命令：'前进'、'后退'、'左转'、'右转'、'跳'、'握手'、'抬头'、'红色灯'。"
+            }
+        else:
+            return {
+                "intent": "unknown",
+                "action": "none",
+                "parameters": {},
+                "reply": "I'm not sure what you want me to do. Try commands like 'move forward', 'turn left', 'jump', or 'look up'."
+            }
     
     def _extract_duration(self, msg: str) -> float:
         """Extract duration from message."""
@@ -511,6 +564,10 @@ def create_llm_client(config: Dict[str, Any], use_mock: bool = False) -> LLMClie
     """
     Create an LLM client from configuration.
     
+    API key can be set in two ways:
+    1. Directly in config: llm.api_key: "sk-xxx"
+    2. Via environment variable: llm.api_key_env: "OPENAI_API_KEY"
+    
     Args:
         config: Configuration dictionary
         use_mock: If True, create a mock client for testing
@@ -523,11 +580,19 @@ def create_llm_client(config: Dict[str, Any], use_mock: bool = False) -> LLMClie
     
     llm_config = config.get("llm", {})
     
-    api_key = os.environ.get(llm_config.get("api_key_env", "OPENAI_API_KEY"))
+    # Try to get API key in order of priority:
+    # 1. Direct api_key in config
+    # 2. Environment variable specified in api_key_env
+    # 3. Default OPENAI_API_KEY environment variable
+    api_key = llm_config.get("api_key")
+    if not api_key:
+        env_var = llm_config.get("api_key_env", "OPENAI_API_KEY")
+        api_key = os.environ.get(env_var)
     
     return LLMClient(
         api_key=api_key,
         model=llm_config.get("model", "gpt-4o-mini"),
+        base_url=llm_config.get("base_url"),  # Support custom endpoints
         max_tokens=llm_config.get("max_tokens", 500),
         temperature=llm_config.get("temperature", 0.7),
         system_prompt=llm_config.get("system_prompt")
