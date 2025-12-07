@@ -8,6 +8,7 @@ Handles camera input and computer vision processing including:
 - Motion detection
 
 Designed to integrate with existing camera_opencv.py structure.
+Supports both OpenCV VideoCapture and Picamera2 for Raspberry Pi.
 """
 
 import cv2
@@ -46,7 +47,8 @@ class VisionProcessor:
         camera_id: int = 0,
         width: int = 640,
         height: int = 480,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        use_picamera2: bool = False
     ):
         """
         Initialize the vision processor.
@@ -56,14 +58,17 @@ class VisionProcessor:
             width: Frame width
             height: Frame height
             config: Vision configuration dictionary
+            use_picamera2: Use Picamera2 instead of OpenCV (for Raspberry Pi)
         """
         self.camera_id = camera_id
         self.width = width
         self.height = height
         self.config = config or {}
+        self.use_picamera2 = use_picamera2
         
         # Camera
         self._camera: Optional[cv2.VideoCapture] = None
+        self._picam2 = None  # Picamera2 instance
         self._frame: Optional[np.ndarray] = None
         self._frame_lock = threading.Lock()
         
@@ -142,13 +147,34 @@ class VisionProcessor:
             return True
         
         # Initialize camera
-        self._camera = cv2.VideoCapture(self.camera_id)
-        if not self._camera.isOpened():
-            print(f"[Vision] Failed to open camera {self.camera_id}")
-            return False
+        if self.use_picamera2:
+            # Use Picamera2 for Raspberry Pi
+            try:
+                from picamera2 import Picamera2
+                self._picam2 = Picamera2()
+                config = self._picam2.create_preview_configuration(
+                    main={"size": (self.width, self.height)}
+                )
+                self._picam2.configure(config)
+                self._picam2.start()
+                print(f"[Vision] Picamera2 started ({self.width}x{self.height})")
+            except ImportError:
+                print("[Vision] Picamera2 not available, falling back to OpenCV")
+                self.use_picamera2 = False
+            except Exception as e:
+                print(f"[Vision] Picamera2 failed: {e}, falling back to OpenCV")
+                self.use_picamera2 = False
         
-        self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if not self.use_picamera2:
+            # Use OpenCV VideoCapture
+            self._camera = cv2.VideoCapture(self.camera_id)
+            if not self._camera.isOpened():
+                print(f"[Vision] Failed to open camera {self.camera_id}")
+                return False
+            
+            self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            print(f"[Vision] OpenCV camera started ({self.width}x{self.height})")
         
         # Start processing thread
         self._is_running = True
@@ -169,6 +195,13 @@ class VisionProcessor:
         if self._camera:
             self._camera.release()
             self._camera = None
+        
+        if self._picam2:
+            try:
+                self._picam2.stop()
+            except:
+                pass
+            self._picam2 = None
         
         print("[Vision] Stopped")
     
@@ -207,12 +240,32 @@ class VisionProcessor:
     def _process_loop(self):
         """Main processing loop (runs in background thread)."""
         while self._is_running:
-            if self._camera is None or not self._camera.isOpened():
-                time.sleep(0.1)
-                continue
+            frame = None
             
-            ret, frame = self._camera.read()
-            if not ret or frame is None:
+            # Capture frame from appropriate source
+            if self.use_picamera2 and self._picam2:
+                try:
+                    # Picamera2 returns XBGR or RGB, convert to BGR for OpenCV
+                    frame = self._picam2.capture_array()
+                    if frame is not None:
+                        # Convert from RGBA/BGRA to BGR if needed
+                        if frame.shape[2] == 4:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                except Exception as e:
+                    time.sleep(0.1)
+                    continue
+            else:
+                # OpenCV VideoCapture
+                if self._camera is None or not self._camera.isOpened():
+                    time.sleep(0.1)
+                    continue
+                
+                ret, frame = self._camera.read()
+                if not ret or frame is None:
+                    time.sleep(0.01)
+                    continue
+            
+            if frame is None:
                 time.sleep(0.01)
                 continue
             
@@ -506,5 +559,6 @@ def create_vision_processor(config: Dict[str, Any]) -> VisionProcessor:
         camera_id=cam_config.get("device_id", 0),
         width=cam_config.get("width", 640),
         height=cam_config.get("height", 480),
-        config=config
+        config=config,
+        use_picamera2=cam_config.get("use_picamera2", False)
     )
