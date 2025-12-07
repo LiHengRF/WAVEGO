@@ -21,7 +21,7 @@ hardware:
 
   audio:
     # Microphone settings
-    mic_device_index: null  # null for default device
+    mic_device_index: 1  # 1 for default device
     sample_rate: 16000
     chunk_size: 1024
     record_seconds: 5  # Max recording time for voice input
