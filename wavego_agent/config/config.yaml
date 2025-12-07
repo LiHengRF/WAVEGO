@@ -41,7 +41,7 @@ llm:
   # api_key: "sk-your-api-key-here"
   
   # Method 2: Environment variable (recommended for security)
-  api_key_env: "API_KEY"  # Reads from this env variable
+  api_key_env: "OPENAI_API_KEY"  # Reads from this env variable
   
   # Optional: Custom API endpoint (for Azure, local LLM, etc.)
   # base_url: "https://your-endpoint.openai.azure.com/v1"
